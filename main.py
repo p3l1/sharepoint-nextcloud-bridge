@@ -7,14 +7,15 @@ from sharepy import SharePointSession
 import logging
 import argparse
 import re
+import nextcloud_client
 from dotenv import dotenv_values
 
 # Create CLI
 
-parser = argparse.ArgumentParser(description="Sync Microsoft Sharepoint file to Nextcloud.")
-parser.add_argument('-v', '--verbose', action='store_const', const=logging.DEBUG, default=logging.INFO, help='Show additional information.')
+parser = argparse.ArgumentParser(description="Download Microsoft Sharepoint files and upload them to Nextcloud.")
+parser.add_argument('-v', '--verbose', action='store_const', const=logging.DEBUG, default=logging.INFO, help='Show additional information for debugging purposes')
 parser.add_argument('-i', '--interactive', action='store_const', const=True, default=False, help='Credentials will be read from user input instead of .env file')
-parser.add_argument('-l', '--list', default='files.txt', help='Text file containing Sharepoint URLs to download files from')
+parser.add_argument('-l', '--list', default='files.txt', metavar='<PATH>', help='File containing Sharepoint URLs to download files from. One URL per line')
 
 args = parser.parse_args()
 
@@ -38,9 +39,31 @@ def read_environment() -> dict:
     }
     return config
 
-def download(sharepoint_session: SharePointSession) -> None:
+def upload(nextcloud_session: nextcloud_client.Client, config: dict) -> None:
+    """
+    Upload all files within FILES_DOWNLOAD_PATH to NEXTCLOUD_REMOTE_PATH at NEXTCLOUD_URL
+    """
+    try:
+        nextcloud_session.mkdir(config['NEXTCLOUD_REMOTE_PATH'])
+    except nextcloud_client.HTTPResponseError as e:
+        if e.status_code == 405:
+            logger.info('NEXTCLOUD_REMOTE_PATH already exists')
+        else:
+            logger.exception(e)
+    
+    logger.info(f'Start uploading files to Nextcloud at {config["NEXTCLOUD_URL"]}')
+    for file in os.listdir(config['FILES_DOWNLOAD_PATH']):
+        logger.debug(f'Uploading {file} to {config["NEXTCLOUD_REMOTE_PATH"]}{file}')
+        nextcloud_session.put_file(config['NEXTCLOUD_REMOTE_PATH'], f'{config["FILES_DOWNLOAD_PATH"]}{file}')
+    
+    return
 
-    download_path = 'downloads/'
+def download(sharepoint_session: SharePointSession, config: dict) -> None:
+    """
+    Download all files from --list option to FILES_DOWNLOAD_PATH
+    """
+
+    download_path = config['FILES_DOWNLOAD_PATH']
     download_path_exists = os.path.exists(download_path)
     download_path_is_file = os.path.isfile(download_path)
 
@@ -63,12 +86,14 @@ def download(sharepoint_session: SharePointSession) -> None:
 
         response = sharepoint_session.getfile(url=url, filename=f'{download_path}{filename}')
         logger.debug(response)
+    
     return
 
 def main() -> None:
     
     config = read_environment()
     sharepoint_session: SharePointSession
+    nextcloud_session = nextcloud_client.Client(config['NEXTCLOUD_URL'])
 
     logger.debug(f'Configuration dict: {str(config)}')
     
@@ -79,7 +104,15 @@ def main() -> None:
         """
         logger.warning('Ignoring SHAREPOINT_USER_NAME and SHAREPOINT_USER_PASSWORD.')
         sharepoint_session = sharepy.connect(site=config['SHAREPOINT_URL'])
-        download(sharepoint_session)
+
+        logger.warning('Ignoring NEXTCLOUD_USER_NAME and SHAREPOINT_USER_PASSWORD.')
+        nc_username = input("Nextcloud username:")
+        nc_password = input("Nextcloud password:")
+
+        nextcloud_session.login(nc_username, nc_password)
+        
+        download(sharepoint_session, config)
+        upload(nextcloud_session, config)
         return
 
     logger.info(f'Connecting to {config["SHAREPOINT_URL"]}')
@@ -88,7 +121,11 @@ def main() -> None:
         username=config['SHAREPOINT_USER_NAME'],
         password=config['SHAREPOINT_USER_PASSWORD']
     )
-    download(sharepoint_session)
+
+    nextcloud_session.login(config['NEXTCLOUD_USER_NAME'], config['NEXTCLOUD_USER_PASSWORD'])
+    
+    download(sharepoint_session, config)
+    upload(nextcloud_session, config)
     return
 
 if __name__ == '__main__':
