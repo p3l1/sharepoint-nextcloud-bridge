@@ -20,6 +20,8 @@ options:
 
 See [`.env.example`](.env.example)
 
+System environment variables take precedence over the `.env` file.
+
 ```shell
 # Microsoft Sharepoint Credentials
 SHAREPOINT_URL=my.sharepoint.com
