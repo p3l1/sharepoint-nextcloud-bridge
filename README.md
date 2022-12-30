@@ -35,3 +35,7 @@ NEXTCLOUD_REMOTE_PATH=sharepoint/
 # Local path for files to be uploaded
 FILES_DOWNLOAD_PATH=downloads/
 ```
+
+# License
+
+[MIT](LICENSE)
